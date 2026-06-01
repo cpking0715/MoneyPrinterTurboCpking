@@ -31,7 +31,11 @@ def _normalize_text_response(content, llm_provider: str) -> str:
     if not content:
         raise ValueError(f"[{llm_provider}] returned empty text content")
 
-    return content.replace("\n", "")
+    # Normalize newlines: preserve paragraph breaks (double newlines)
+    # while removing single newlines that are just formatting artifacts
+    content = re.sub(r'\n{3,}', '\n\n', content)        # collapse 3+ newlines -> double
+    content = re.sub(r'(?<!\n)\n(?!\n)', '', content)    # remove single newlines
+    return content
 
 
 def _extract_chat_completion_text(response, llm_provider: str) -> str:
@@ -458,14 +462,89 @@ def _generate_response(prompt: str) -> str:
         return f"Error: {str(e)}"
 
 
+def _make_multi_script_instruction(paragraph_number: int) -> str:
+    '''
+    When paragraph_number > 1, the user wants multiple INDEPENDENT complete video scripts,
+    each covering a different angle of the same subject. This helper generates a clear
+    instruction section that tells the LLM to produce standalone scripts rather than
+    continuation paragraphs.
+    '''
+    if paragraph_number <= 1:
+        return ""
+    return f"""
+## MULTI-VIDEO MODE
+You are generating {paragraph_number} COMPLETE INDEPENDENT video scripts.
+- Each script must be separated by a blank line (press Enter twice).
+- Each script must be a STANDALONE mini-script that can be its own video.
+- Each script must cover a DIFFERENT angle or aspect of the subject.
+- Do NOT make them continuations of each other — each one must feel like a complete, self-contained video.
+- Example: for subject "扫地机器人", script 1 covers basic features, script 2 covers buying guide, script 3 covers maintenance tips.
+"""
+
+
 def generate_script(
-    video_subject: str, language: str = "", paragraph_number: int = 1
+    video_subject: str, language: str = "", paragraph_number: int = 1, video_duration: int = 0
 ) -> str:
-    prompt = f"""
+    # 中文正常语速约为 3.5 字/秒
+    if video_duration > 0 and language in ("zh-CN", "zh-HK", "zh-TW", ""):
+        target_chars = int(video_duration * 3.5)
+
+        if paragraph_number > 1:
+            # 多段独立文案：每段是一个完整的独立脚本，覆盖主题的不同角度
+            per_script_duration = video_duration // paragraph_number
+            per_script_chars = target_chars // paragraph_number
+            multi_instruction = f"""
+## Important: Multi-Video Script Generation
+You are generating {paragraph_number} COMPLETE INDEPENDENT video scripts, separated by a blank line.
+Each script must be a standalone mini-video script that can be published independently.
+- Each script should cover a DIFFERENT angle or aspect of the subject.
+- Each script should be approximately {per_script_chars} Chinese characters ({per_script_duration}s speaking time).
+- Do NOT make the scripts continuations of each other — each one must feel like a complete, self-contained video.
+- Example: for subject "扫地机器人", script 1 covers basic features, script 2 covers buying guide, etc.
+"""
+        else:
+            multi_instruction = ""
+
+        prompt = f"""
 # Role: Video Script Generator
 
 ## Goals:
 Generate a script for a video, depending on the subject of the video.
+{'## Multi-Video Mode:' + multi_instruction if multi_instruction else ''}
+
+## Constrains:
+1. the script is to be returned as a string with the specified target character count.
+2. do not under any circumstance reference this prompt in your response.
+3. get straight to the point, don't start with unnecessary things like, "welcome to this video".
+4. you must not include any type of markdown or formatting in the script, never use a title.
+5. only return the raw content of the script.
+6. do not include "voiceover", "narrator" or similar indicators of what should be spoken at the beginning of each paragraph or line.
+7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.
+8. respond in the same language as the video subject.
+9. the script should be approximately {target_chars} Chinese characters long, which takes about {video_duration} seconds to speak at a normal pace. Do NOT make it too long or too short.
+10. use natural paragraph breaks — separate paragraphs with a blank line (press Enter twice between paragraphs).
+
+# Initialization:
+- video subject: {video_subject}
+- target duration: {video_duration} seconds (about {target_chars} Chinese characters)
+- number of independent scripts: {paragraph_number}
+""".strip()
+    else:
+        if video_duration > 0:
+            # English or other languages, approximate ~150 words/min = 2.5 words/sec
+            target_words = int(video_duration * 2.5)
+            duration_hint = f"\n9. the script should be approximately {target_words} words long, which takes about {video_duration} seconds to speak at a normal pace. Do NOT make it too long or too short.\n10. separate paragraphs with a blank line (press Enter twice between paragraphs)."
+            duration_ctx = f"\n- target duration: {video_duration} seconds (about {target_words} words)"
+        else:
+            duration_hint = ""
+            duration_ctx = ""
+
+        prompt = f"""
+# Role: Video Script Generator
+
+## Goals:
+Generate a script for a video, depending on the subject of the video.
+{_make_multi_script_instruction(paragraph_number)}
 
 ## Constrains:
 1. the script is to be returned as a string with the specified number of paragraphs.
@@ -475,12 +554,14 @@ Generate a script for a video, depending on the subject of the video.
 5. only return the raw content of the script.
 6. do not include "voiceover", "narrator" or similar indicators of what should be spoken at the beginning of each paragraph or line.
 7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.
-8. respond in the same language as the video subject.
+8. respond in the same language as the video subject.{duration_hint}
+{'9. separate paragraphs with a blank line (press Enter twice between paragraphs).' if not duration_hint else ''}
 
 # Initialization:
 - video subject: {video_subject}
-- number of paragraphs: {paragraph_number}
+- number of {'independent scripts' if paragraph_number > 1 else 'paragraphs'}: {paragraph_number}{" (each is a complete standalone video covering a different angle)" if paragraph_number > 1 else ""}{duration_ctx}
 """.strip()
+    
     if language:
         prompt += f"\n- language: {language}"
 

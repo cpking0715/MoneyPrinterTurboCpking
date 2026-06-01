@@ -46,6 +46,11 @@ streamlit_style = """
 h1 {
     padding-top: 0 !important;
 }
+/* 限制日志窗口高度，防止日志过多时撑爆页面 */
+div[data-testid="stCodeBlock"] {
+    max-height: 200px;
+    overflow-y: auto !important;
+}
 </style>
 """
 st.markdown(streamlit_style, unsafe_allow_html=True)
@@ -553,12 +558,25 @@ with left_panel:
         )
         params.video_language = video_languages[selected_index][1]
 
+        # 视频总时长（可选，留空或填0则自动根据段落数生成）
+        duration_str = st.text_input(
+            tr("Video Duration (seconds, 0=auto)"),
+            value="0",
+            key="video_duration_input",
+        ).strip()
+        try:
+            params.video_duration = int(duration_str) if duration_str else 0
+        except ValueError:
+            st.warning(tr("Please enter a valid number for video duration"))
+            params.video_duration = 0
+
         if st.button(
             tr("Generate Video Script and Keywords"), key="auto_generate_script"
         ):
             with st.spinner(tr("Generating Video Script and Keywords")):
                 script = llm.generate_script(
-                    video_subject=params.video_subject, language=params.video_language
+                    video_subject=params.video_subject, language=params.video_language,
+                    video_duration=params.video_duration, paragraph_number=params.paragraph_number,
                 )
                 terms = llm.generate_terms(params.video_subject, script)
                 if "Error: " in script:
@@ -681,6 +699,16 @@ with middle_panel:
             tr("Number of Videos Generated Simultaneously"),
             options=[1, 2, 3, 4, 5],
             index=0,
+            key="video_count_select",
+        )
+        # paragraph_number 默认跟随 video_count，用户可手动覆盖
+        params.paragraph_number = st.number_input(
+            tr("Paragraph Number (each paragraph = one video)"),
+            min_value=1,
+            max_value=10,
+            value=params.video_count,
+            step=1,
+            key="paragraph_number_input",
         )
     with st.container(border=True):
         st.write(tr("Audio Settings"))
@@ -1132,6 +1160,9 @@ if start_button:
             return
         with log_container:
             log_records.append(msg)
+            # 只保留最近 50 条日志，防止日志内容无限增长
+            if len(log_records) > 50:
+                log_records[:] = log_records[-50:]
             st.code("\n".join(log_records))
 
     logger.add(log_received)

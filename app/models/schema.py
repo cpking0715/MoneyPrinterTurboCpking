@@ -77,6 +77,7 @@ class VideoParams(BaseModel):
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.random.value
     video_transition_mode: Optional[VideoTransitionMode] = None
     video_clip_duration: Optional[int] = 5
+    video_duration: Optional[int] = 0  # Target total video duration in seconds; 0 = auto (original behavior)
     video_count: Optional[int] = 1
 
     video_source: Optional[str] = "pexels"
@@ -151,6 +152,7 @@ class VideoScriptParams:
 
     video_subject: Optional[str] = "春天的花海"
     video_language: Optional[str] = ""
+    video_duration: Optional[int] = 0
     paragraph_number: Optional[int] = 1
 
 

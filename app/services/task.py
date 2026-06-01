@@ -21,6 +21,7 @@ def generate_script(task_id, params):
             video_subject=params.video_subject,
             language=params.video_language,
             paragraph_number=params.paragraph_number,
+            video_duration=params.video_duration,
         )
     else:
         logger.debug(f"video script: \n{video_script}")
@@ -70,7 +71,7 @@ def save_script_data(task_id, video_script, video_terms, params):
         f.write(utils.to_json(script_data))
 
 
-def generate_audio(task_id, params, video_script):
+def generate_audio(task_id, params, video_script, output_name="audio.mp3"):
     '''
     Generate audio for the video script.
     If a custom audio file is provided, it will be used directly.
@@ -92,7 +93,7 @@ def generate_audio(task_id, params, video_script):
             )
         else:
             logger.info("no custom audio file provided, using TTS to generate audio.")
-        audio_file = path.join(utils.task_dir(task_id), "audio.mp3")
+        audio_file = path.join(utils.task_dir(task_id), output_name)
         sub_maker = voice.tts(
             text=video_script,
             voice_name=voice.parse_voice_name(params.voice_name),
@@ -123,7 +124,7 @@ def generate_audio(task_id, params, video_script):
             return None, None, None
         return custom_audio_file, audio_duration, None
 
-def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
+def generate_subtitle(task_id, params, video_script, sub_maker, audio_file, output_name="subtitle.srt"):
     '''
     Generate subtitle for the video script.
     If subtitle generation is disabled or no subtitle maker is provided, it will return an empty string.
@@ -135,7 +136,7 @@ def generate_subtitle(task_id, params, video_script, sub_maker, audio_file):
     if not params.subtitle_enabled or sub_maker is None:
         return ""
 
-    subtitle_path = path.join(utils.task_dir(task_id), "subtitle.srt")
+    subtitle_path = path.join(utils.task_dir(task_id), output_name)
     subtitle_provider = config.app.get("subtitle_provider", "edge").strip().lower()
     logger.info(f"\n\n## generating subtitle, provider: {subtitle_provider}")
 
@@ -195,7 +196,8 @@ def get_video_materials(task_id, params, video_terms, audio_duration):
 
 
 def generate_final_videos(
-    task_id, params, downloaded_videos, audio_file, subtitle_path
+    task_id, params, downloaded_videos, audio_file, subtitle_path,
+    para_audios=None, para_subtitles=None,
 ):
     final_video_paths = []
     combined_video_paths = []
@@ -207,6 +209,10 @@ def generate_final_videos(
     _progress = 50
     for i in range(params.video_count):
         index = i + 1
+        # Use per-paragraph audio/subtitle if available, otherwise use the global one
+        cur_audio = para_audios[i][0] if para_audios and i < len(para_audios) else audio_file
+        cur_subtitle = para_subtitles[i] if para_subtitles and i < len(para_subtitles) else subtitle_path
+
         combined_video_path = path.join(
             utils.task_dir(task_id), f"combined-{index}.mp4"
         )
@@ -214,7 +220,7 @@ def generate_final_videos(
         video.combine_videos(
             combined_video_path=combined_video_path,
             video_paths=downloaded_videos,
-            audio_file=audio_file,
+            audio_file=cur_audio,
             video_aspect=params.video_aspect,
             video_concat_mode=video_concat_mode,
             video_transition_mode=video_transition_mode,
@@ -230,8 +236,8 @@ def generate_final_videos(
         logger.info(f"\n\n## generating video: {index} => {final_video_path}")
         video.generate_video(
             video_path=combined_video_path,
-            audio_path=audio_file,
-            subtitle_path=subtitle_path,
+            audio_path=cur_audio,
+            subtitle_path=cur_subtitle,
             output_file=final_video_path,
             params=params,
         )
@@ -281,69 +287,168 @@ def start(task_id, params: VideoParams, stop_at: str = "video"):
 
     sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=20)
 
-    # 3. Generate audio
-    audio_file, audio_duration, sub_maker = generate_audio(
-        task_id, params, video_script
+    # Split script into paragraphs
+    paragraphs = [p.strip() for p in re.split(r'\n{2,}', video_script) if p.strip()]
+
+    # Per-paragraph mode: when video_count == paragraph_number > 1 and paragraphs match
+    per_para = (
+        params.video_count > 1
+        and params.paragraph_number == params.video_count
+        and len(paragraphs) == params.video_count
     )
-    if not audio_file:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        return
 
-    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
+    # Initialize shared variables (used in kwargs at the end)
+    audio_file = ""
+    audio_duration = 0
+    subtitle_path = ""
 
-    if stop_at == "audio":
-        sm.state.update_task(
-            task_id,
-            state=const.TASK_STATE_COMPLETE,
-            progress=100,
-            audio_file=audio_file,
+    if per_para:
+        # ========= Per-Paragraph Mode: each paragraph = one independent video =========
+        logger.info(f"\n\n## per-paragraph mode: {len(paragraphs)} paragraphs => {len(paragraphs)} videos")
+        para_audios = []  # list of (audio_file, audio_duration, sub_maker)
+        para_subtitles = []
+        total_audio_duration = 0
+
+        for i, para_text in enumerate(paragraphs):
+            p_idx = i + 1
+            logger.info(f"\n\n## generating audio for paragraph {p_idx}/{len(paragraphs)}")
+            audio_file, audio_dur, sub_maker = generate_audio(
+                task_id, params, para_text, output_name=f"audio_{p_idx}.mp3"
+            )
+            if not audio_file:
+                sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+                return
+            para_audios.append((audio_file, audio_dur, sub_maker))
+            total_audio_duration += audio_dur
+
+            sm.state.update_task(task_id, progress=20 + (p_idx) * 5 / len(paragraphs))
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
+
+        if stop_at == "audio":
+            sm.state.update_task(
+                task_id, state=const.TASK_STATE_COMPLETE, progress=100,
+                audio_file=para_audios[0][0], audio_duration=total_audio_duration,
+            )
+            return {"audio_file": para_audios[0][0], "audio_duration": total_audio_duration}
+
+        # Generate subtitles for each paragraph
+        for i, para_text in enumerate(paragraphs):
+            p_idx = i + 1
+            logger.info(f"\n\n## generating subtitle for paragraph {p_idx}/{len(paragraphs)}")
+            sub_path = generate_subtitle(
+                task_id, params, para_text, para_audios[i][2], para_audios[i][0],
+                output_name=f"subtitle_{p_idx}.srt"
+            )
+            para_subtitles.append(sub_path)
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+
+        if stop_at == "subtitle":
+            sm.state.update_task(
+                task_id, state=const.TASK_STATE_COMPLETE, progress=100,
+                subtitle_path=para_subtitles[0] if para_subtitles else "",
+            )
+            return {"subtitle_path": para_subtitles[0] if para_subtitles else ""}
+
+        # Get video materials (total duration = sum of all paragraphs)
+        # get_video_materials internally multiplies by video_count, so we pre-divide
+        per_video_duration = total_audio_duration / params.video_count
+        downloaded_videos = get_video_materials(
+            task_id, params, video_terms, per_video_duration
         )
-        return {"audio_file": audio_file, "audio_duration": audio_duration}
+        if not downloaded_videos:
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+            return
 
-    # 4. Generate subtitle
-    subtitle_path = generate_subtitle(
-        task_id, params, video_script, sub_maker, audio_file
-    )
+        if stop_at == "materials":
+            sm.state.update_task(
+                task_id, state=const.TASK_STATE_COMPLETE, progress=100,
+                materials=downloaded_videos,
+            )
+            return {"materials": downloaded_videos}
 
-    if stop_at == "subtitle":
-        sm.state.update_task(
-            task_id,
-            state=const.TASK_STATE_COMPLETE,
-            progress=100,
-            subtitle_path=subtitle_path,
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=50)
+
+        if type(params.video_concat_mode) is str:
+            params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
+
+        # Generate final videos with per-paragraph audio & subtitle
+        final_video_paths, combined_video_paths = generate_final_videos(
+            task_id, params, downloaded_videos, "", "",
+            para_audios=para_audios, para_subtitles=para_subtitles,
         )
-        return {"subtitle_path": subtitle_path}
 
-    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+        # Set shared variables for the final kwargs
+        audio_file = para_audios[0][0] if para_audios else ""
+        audio_duration = total_audio_duration
+        subtitle_path = para_subtitles[0] if para_subtitles else ""
 
-    # 5. Get video materials
-    downloaded_videos = get_video_materials(
-        task_id, params, video_terms, audio_duration
-    )
-    if not downloaded_videos:
-        sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
-        return
-
-    if stop_at == "materials":
-        sm.state.update_task(
-            task_id,
-            state=const.TASK_STATE_COMPLETE,
-            progress=100,
-            materials=downloaded_videos,
+    else:
+        # ========= Original Single-Script Flow =========
+        # 3. Generate audio
+        audio_file, audio_duration, sub_maker = generate_audio(
+            task_id, params, video_script
         )
-        return {"materials": downloaded_videos}
+        if not audio_file:
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+            return
 
-    sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=50)
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=30)
 
-    # 仅完整视频生成流程才需要处理视频拼接模式；
-    # 这样可以避免 /subtitle 和 /audio 这类请求访问不存在的字段。
-    if type(params.video_concat_mode) is str:
-        params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
+        if stop_at == "audio":
+            sm.state.update_task(
+                task_id,
+                state=const.TASK_STATE_COMPLETE,
+                progress=100,
+                audio_file=audio_file,
+            )
+            return {"audio_file": audio_file, "audio_duration": audio_duration}
 
-    # 6. Generate final videos
-    final_video_paths, combined_video_paths = generate_final_videos(
-        task_id, params, downloaded_videos, audio_file, subtitle_path
-    )
+        # 4. Generate subtitle
+        subtitle_path = generate_subtitle(
+            task_id, params, video_script, sub_maker, audio_file
+        )
+
+        if stop_at == "subtitle":
+            sm.state.update_task(
+                task_id,
+                state=const.TASK_STATE_COMPLETE,
+                progress=100,
+                subtitle_path=subtitle_path,
+            )
+            return {"subtitle_path": subtitle_path}
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=40)
+
+        # 5. Get video materials
+        downloaded_videos = get_video_materials(
+            task_id, params, video_terms, audio_duration
+        )
+        if not downloaded_videos:
+            sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
+            return
+
+        if stop_at == "materials":
+            sm.state.update_task(
+                task_id,
+                state=const.TASK_STATE_COMPLETE,
+                progress=100,
+                materials=downloaded_videos,
+            )
+            return {"materials": downloaded_videos}
+
+        sm.state.update_task(task_id, state=const.TASK_STATE_PROCESSING, progress=50)
+
+        # 仅完整视频生成流程才需要处理视频拼接模式；
+        # 这样可以避免 /subtitle 和 /audio 这类请求访问不存在的字段。
+        if type(params.video_concat_mode) is str:
+            params.video_concat_mode = VideoConcatMode(params.video_concat_mode)
+
+        # 6. Generate final videos
+        final_video_paths, combined_video_paths = generate_final_videos(
+            task_id, params, downloaded_videos, audio_file, subtitle_path
+        )
 
     if not final_video_paths:
         sm.state.update_task(task_id, state=const.TASK_STATE_FAILED)
