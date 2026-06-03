@@ -695,6 +695,18 @@ with middle_panel:
         params.video_clip_duration = st.selectbox(
             tr("Clip Duration"), options=[2, 3, 4, 5, 6, 7, 8, 9, 10], index=1
         )
+        # 视频片段最小时长：短于此值的片段会被过滤掉，不参与拼接
+        min_clip_options = [1, 2, 3, 4, 5]
+        # 默认索引 0（1秒），但需要确保不超过当前选中的最大片段时长
+        default_min_index = 0
+        if params.video_clip_duration < 5:
+            # 如果最大时长较小，限制 min 的选项范围
+            min_clip_options = [i for i in [1, 2, 3, 4, 5] if i <= params.video_clip_duration]
+        params.video_min_clip_duration = st.selectbox(
+            tr("Min Clip Duration"),
+            options=min_clip_options,
+            index=default_min_index,
+        )
         params.video_count = st.selectbox(
             tr("Number of Videos Generated Simultaneously"),
             options=[1, 2, 3, 4, 5],

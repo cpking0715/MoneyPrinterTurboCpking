@@ -35,6 +35,7 @@
     "Portrait": "Portrait 9:16",
     "Landscape": "Landscape 16:9",
     "Clip Duration": "Maximum Duration of Video Clips (seconds)",
+    "Min Clip Duration": "Minimum Duration of Video Clips (seconds, clips shorter than this will be filtered out)",
     "Video Duration (seconds, 0=auto)": "Video Duration (seconds, 0=auto)",
     "Please enter a valid number for video duration": "Please enter a valid number for video duration",
     "Number of Videos Generated Simultaneously": "Number of Videos Generated Simultaneously",

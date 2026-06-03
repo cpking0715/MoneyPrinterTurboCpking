@@ -225,6 +225,7 @@ def generate_final_videos(
             video_concat_mode=video_concat_mode,
             video_transition_mode=video_transition_mode,
             max_clip_duration=params.video_clip_duration,
+            min_clip_duration=params.video_min_clip_duration,
             threads=params.n_threads,
         )
 

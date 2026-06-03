@@ -77,6 +77,7 @@ class VideoParams(BaseModel):
     video_concat_mode: Optional[VideoConcatMode] = VideoConcatMode.random.value
     video_transition_mode: Optional[VideoTransitionMode] = None
     video_clip_duration: Optional[int] = 5
+    video_min_clip_duration: Optional[int] = 1  # Minimum clip duration in seconds; clips shorter than this are filtered out
     video_duration: Optional[int] = 0  # Target total video duration in seconds; 0 = auto (original behavior)
     video_count: Optional[int] = 1
 

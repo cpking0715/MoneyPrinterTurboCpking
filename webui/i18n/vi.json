@@ -35,6 +35,7 @@
     "Portrait": "Dọc 9:16",
     "Landscape": "Ngang 16:9",
     "Clip Duration": "Thời Lượng Tối Đa Của Đoạn Video (giây)",
+    "Min Clip Duration": "Thời Lượng Tối Thiểu Của Đoạn Video (giây, các đoạn ngắn hơn sẽ bị lọc)",
     "Number of Videos Generated Simultaneously": "Số Video Được Tạo Ra Đồng Thời",
     "Audio Settings": "**Cài Đặt Âm Thanh**",
     "Speech Synthesis": "Giọng Đọc Văn Bản",

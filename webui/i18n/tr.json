@@ -35,6 +35,7 @@
     "Portrait": "Dikey 9:16",
     "Landscape": "Yatay 16:9",
     "Clip Duration": "Video Kliplerinin Maksimum Süresi (saniye)",
+    "Min Clip Duration": "Video Kliplerinin Minimum Süresi (saniye, bundan kısa klipler filtrelenir)",
     "Number of Videos Generated Simultaneously": "Aynı Anda Oluşturulan Video Sayısı",
     "Audio Settings": "**Ses Ayarları**",
     "Speech Synthesis": "Konuşma Sentezi Sesi",

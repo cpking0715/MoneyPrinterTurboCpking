@@ -35,6 +35,7 @@
     "Portrait": "Portrait 9:16",
     "Landscape": "Landschaft 16:9",
     "Clip Duration": "Maximale Dauer einzelner Videoclips in sekunden",
+    "Min Clip Duration": "Minimale Dauer einzelner Videoclips in Sekunden (kürzere Clips werden herausgefiltert)",
     "Number of Videos Generated Simultaneously": "Anzahl der parallel generierten Videos",
     "Audio Settings": "**Audio Einstellungen**",
     "Speech Synthesis": "Sprachausgabe",
